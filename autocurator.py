@@ -24,18 +24,27 @@ twitterApi = twitter.Api(consumer_key=consumerKey,
 
 # Loop Controls
 sentinelValue = 0
-queryList = [] # List of search strings for the NewsAPI
+queryList = ['artificial intelligence',
+             'machine learning',
+             'big data',
+             'internet of things',
+             'data science',
+             'robots']
 pastQueries = []
 pastRetweets = []
+retweets = twitterApi.GetUserRetweets(trim_user=True)
+for i in retweets:
+    tempdict = json.loads(str(i))
+    pastRetweets.append(tempdict["id"])
+print(print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Retweets populated.'))
 newsDict = {}
 for category in queryList:
     newsDict[category] = ''
 
 # Not a list object, must be a comma-separated string to pass to Google get_everything API call.
-newsSources = ''
+newsSources = 'the-verge,ars-technica,hacker-news,techcrunch,techradar,the-next-web,wired,vice-news,the-new-york-times'
 
 
-# tested, works.
 def query_news_api(query):
     newsjson = newsApi.get_everything(q=query,
                                     sources=newsSources,
@@ -45,131 +54,106 @@ def query_news_api(query):
                                     sort_by='relevancy')
     return newsjson['articles']
 
-# tested works
-def populate_dict():
-    for category in queryList:
-        newsDict[category] = query_news_api(category)
-    for key in newsDict.keys():
-        newentry = []
-        for article in newsDict[key]:
-            newentry.append(article['url'])
-        newsDict[key] = newentry
-    print('Dictionary successfully populated.')
+
+class Update(Thread):
+    def run(self):
+        while True:
+            if dt.now().hour in range(8, 18):
+                for category in queryList:
+                    newsDict[category] = query_news_api(category)
+                for key in newsDict.keys():
+                    newentry = []
+                    for article in newsDict[key]:
+                        newentry.append(article['url'])
+                    newsDict[key] = newentry
+                print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Dictionary successfully populated.')
+                while len(pastQueries) > 100:
+                    queryList.pop(0)
+                while len(pastRetweets) > 100:
+                    pastRetweets.pop(0)
+                print(dt.strftime(dt.now(), '%H:%M:%S') + ' - History cleaned.')
+                print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Housekeeping executed.')
+                time.sleep(7200)
 
 
-# needs testing
-def get_url_from_dict():
-    candidates = newsDict[queryList[sentinelValue]]
-    for url in candidates:
-        if url not in pastQueries:
-            pastQueries.append(url)
-            return url
-        else:
-            continue
+class MakePost(Thread):
+    def run(self):
+        sentinelValue = 0
+        while True:
+            if dt.now().hour in range(8, 18):
+                if bool(newsDict[queryList[sentinelValue]]) is False:
+                    time.sleep(60)
+                failsafevalue = 0
+                print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Fetching news article URL.')
+                candidates = newsDict[queryList[sentinelValue]]
+                targeturl = ''
+                for url in candidates:
+                    if url not in pastQueries:
+                        pastQueries.append(url)
+                        print(dt.strftime(dt.now(), '%H:%M:%S') + ' - URL successfully fetched from dictionary.')
+                        targeturl = url
+                        break
+                    else:
+                        print(print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Error: Unable to fetch url. Trying again.'))
+                        continue
+                content = Article(url=targeturl, memoize_articles=False, MAX_SUMMARY_SENT=1, MAX_SUMMARY=215)
+                content.download()
+                content.parse()
+                content.nlp()
+                status = content.summary
+                try:
+                    twitterApi.PostUpdate(status + ' ' + targeturl)
+                    sentinelValue += 1
+                    if sentinelValue >= (len(queryList)):
+                        sentinelValue = 0
+                    print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Tweeted: ' + status + ' ' + targeturl)
+                except:
+                    print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Error: post already exists.')
+                    failsafevalue += 1
+                    if failsafevalue >= 20:
+                        print(dt.strftime(dt.now(), '%H:%M:%S') + 'Unable to make post. Trying again in 30 minutes.')
+                        break
+                    else:
+                        continue
+            time.sleep(1800)
 
 
-# tested, works.
-def news_post(url):
-    content = Article(url=str(url), memoize_articles=False, MAX_SUMMARY_SENT=1, MAX_SUMMARY=215)
-    content.download()
-    content.parse()
-    content.nlp()
-    status = content.summary
-    try:
-        twitterApi.PostUpdate(status + ' ' + url)
-        print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Tweeted: ' + status + ' ' + url)
-        return True
-    except:
-        print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Error: post already exists.')
-        return False
+class Retweet(Thread):
+    def run(self):
+        while True:
+            if dt.now().hour in range(8, 18):
+                candidates = []
+                listjson = twitterApi.GetListTimeline(slug='', owner_screen_name='',
+                                                      count=50, include_rts=False, include_entities=False,
+                                                      return_json=True)
+                for i in listjson:
+                    candidates.append([i["id"], i["text"], i["retweet_count"]])
+                candidates = sorted(candidates, key=itemgetter(2), reverse=True)
+                for i in candidates:
+                    if i[0] in pastRetweets:
+                        continue
+                    else:
+                        tweetid = i[0]
+                        pastRetweets.append(tweetid)
+                        try:
+                            twitterApi.PostRetweet(tweetid)
+                            print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Retweet: ID ' + str(tweetid))
+                            break
+                        except:
+                            print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Error: retweet already exists.')
+                time.sleep(900)
 
-
-def send_post():
-    while True:
-        url = get_url_from_dict()
-        success = news_post(url)
-        if success is True:
-            break
-        else:
-            continue
-
-
-def send_post_thread():
-    global sentinelValue
-    while True:
-        if (dt.now().hour >= 8) and (dt.now().hour < 18):
-            send_post()
-            sentinelValue += 1
-            if sentinelValue >= (len(queryList)):
-                sentinelValue = 0
-        time.sleep(1800)
-
-
-# tested, works
-def retweet():
-    candidates = []
-    listjson = twitterApi.GetListTimeline(slug='apiList', owner_screen_name='',
-                                          count=50, include_rts=False, include_entities=False, return_json=True)
-    for i in listjson:
-        candidates.append([i["id"], i["text"], i["retweet_count"]])
-    candidates = sorted(candidates, key=itemgetter(2), reverse=True)
-    for i in candidates:
-        if i[0] in pastRetweets:
-            continue
-        else:
-            tweetid = i[0]
-            pastRetweets.append(tweetid)
-            try:
-                twitterApi.PostRetweet(tweetid)
-                print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Retweet: ID ' + str(tweetid))
-                break
-            except:
-                print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Error: retweet already exists.')
-
-
-def retweet_thread():
-    while True:
-        if (dt.now().hour >= 8) and (dt.now().hour < 18):
-            retweet()
-        time.sleep(900)
-
-
-def populate_past_retweets():
-    retweets = twitterApi.GetUserRetweets(trim_user=True)
-    for i in retweets:
-        tempdict = json.loads(str(i))
-        pastRetweets.append(tempdict["id"])
-
-
-def history_cleanup():
-    while len(pastQueries) > 100:
-        queryList.pop(0)
-    while len(pastRetweets) > 100:
-        pastRetweets.pop(0)
-
-
-def housekeeping():
-    while True:
-        if (dt.now().hour >= 8) and (dt.now().hour < 18):
-            populate_dict()
-            history_cleanup()
-        time.sleep(7200)
-
-
-# Initial field population.
-populate_past_retweets()
-populate_dict()
 
 # Timed threads.
 if __name__ == '__main__':
-    t0 = Thread(target=housekeeping())
-    t1 = Thread(target=send_post_thread())
-    t2 = Thread(target=retweet_thread())
-    t0.setDaemon(True)
-    t1.setDaemon(True)
-    t2.setDaemon(True)
-    t0.start()
-    t1.start()
-    t2.start()
+    print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Starting Update() Thread.')
+    Update().setDaemon(True)
+    Update().start()
+    print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Starting MakePost() Thread.')
+    MakePost().setDaemon(True)
+    MakePost().start()
+    print(dt.strftime(dt.now(), '%H:%M:%S') + ' - Starting Retweet() Thread.')
+    Retweet().setDaemon(True)
+    Retweet().start()
     while True:
         pass
