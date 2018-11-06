@@ -6,7 +6,11 @@ My first full-fledged app, a simple bot that automatically pulls news stories re
 Current version only supports Twitter.
 
 To Do, in order of importance:
+
 --A better summarizing algorithm. Status: in progress.
+
 --External storage file or algorithmic population of recent content links to prevent repeats.
+
 --LinkedIn integration
+
 --Facebook integration
