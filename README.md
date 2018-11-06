@@ -5,5 +5,8 @@ My first full-fledged app, a simple bot that automatically pulls news stories re
 
 Current version only supports Twitter.
 
-Next to-do: LinkedIn support.
-Farther down the line: some original or at least more refined NLP than the one found in the newspaper library, which is adequate but can sometimes produce clunky summaries with more popular news sources. Problem with the library as far as I can tell is not the NLP algorithm but the web scraping picking up too much extraneous content and rich media metadata. 
+To Do, in order of importance:
+--A better summarizing algorithm. Status: in progress.
+--External storage file or algorithmic population of recent content links to prevent repeats.
+--LinkedIn integration
+--Facebook integration
